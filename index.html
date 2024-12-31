@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>휘매쓰 연산 챌린지!</title>
+  <!-- MathJax for LaTeX rendering -->
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" defer></script>
+  <style>
+    body {
+      background-color: #fff;
+      color: #000;
+      font-family: sans-serif;
+      margin: 20px;
+    }
+    h1, h2, h3 {
+      margin: 0.5em 0;
+    }
+    .hidden {
+      display: none;
+    }
+    .energy-bar {
+      width: 300px;
+      height: 20px;
+      background: #000; /* 검은색 바탕 */
+      margin: 10px 0;
+      position: relative;
+    }
+    .energy-bar-fill {
+      background: #fff; /* 흰색으로 채워지는 부분 */
+      width: 100%;
+      height: 100%;
+      transition: width 0.2s linear;
+    }
+    .btn {
+      background: #000;
+      color: #fff;
+      padding: 5px 10px;
+      margin: 5px;
+      cursor: pointer;
+      border: 1px solid #000;
+    }
+    .btn:hover {
+      background: #444;
+    }
+    .choice-container {
+      margin-top: 10px;
+    }
+    .choice-container button {
+      display: block;
+      margin: 3px 0;
+      padding: 5px;
+      background: #fff;
+      color: #000;
+      border: 1px solid #000;
+      cursor: pointer;
+      text-align: left;
+    }
+    .choice-container button:hover {
+      background: #eee;
+    }
+    .feedback {
+      margin: 10px 0;
+      font-weight: bold;
+    }
+    .game-info {
+      margin: 10px 0;
+    }
+  </style>
+</head>
+<body>
+<h1>휘매쓰 연산 챌린지!</h1>
+
+<!-- 난이도 선택 화면 -->
+<div id="difficulty-screen">
+  <h2>난이도를 선택하세요</h2>
+  <button class="btn" onclick="startGame('top')">최상(20초/문제, 20점)</button>
+  <button class="btn" onclick="startGame('high')">상(30초/문제, 15점)</button>
+  <button class="btn" onclick="startGame('mid')">중(40초/문제, 13점)</button>
+  <button class="btn" onclick="startGame('low')">하(시간무제한, 10점)</button>
+</div>
+
+<!-- 퀴즈 화면 -->
+<div id="quiz-screen" class="hidden">
+  <div class="game-info">
+    <div>남은 기회: <span id="lives">3</span></div>
+    <div>현재 점수: <span id="score">0</span></div>
+    <div>전체 경과 시간: <span id="total-time">0</span>초</div>
+  </div>
+  <div class="energy-bar hidden" id="energy-bar">
+    <div class="energy-bar-fill" id="energy-fill"></div>
+  </div>
+  <h3 id="question-text"></h3>
+  <div id="choice-container" class="choice-container"></div>
+  <div id="answer-container" class="hidden">
+    <label for="answer-input">정답 입력: </label>
+    <input type="text" id="answer-input" />
+    <button class="btn" onclick="submitShortAnswer()">확인</button>
+  </div>
+  <div id="feedback" class="feedback"></div>
+  <button id="next-btn" class="btn hidden" onclick="nextQuestion()">다음 문제</button>
+</div>
+
+<script>
+// ----------------------------------
+// Math helper: shuffle array
+// ----------------------------------
+function shuffleArray(arr) {
+  for(let i=arr.length-1; i>0; i--){
+    const j=Math.floor(Math.random()*(i+1));
+    [arr[i],arr[j]]=[arr[j],arr[i]];
+  }
+  return arr;
+}
+
+// ----------------------------------
+// 전역 변수
+// ----------------------------------
+let questions = [];     // 섞은 문제 목록
+let currentIndex = 0;   // 현재 문제 인덱스
+let score = 0;          // 점수
+let lives = 3;          // 남은 기회
+let totalTime = 0;      // 전체 경과 시간(초)
+let gameTimerId;        // 전체 시간 측정 setInterval
+let energyTimerId;      // 개별 문제 시간/에너지바 setInterval
+let energyDuration = 0; // 난이도별 제한 시간(초) (하=0 이면 무제한 모드)
+let energyLeft = 0;     // 현재 문제 남은 시간
+let pointsPerQuestion = 0;
+
+// ----------------------------------
+// 난이도별 시작
+// ----------------------------------
+function startGame(difficulty){
+  document.getElementById('difficulty-screen').classList.add('hidden');
+  document.getElementById('quiz-screen').classList.remove('hidden');
+
+  if(difficulty === 'top'){
+    energyDuration = 20;
+    pointsPerQuestion = 20;
+  } else if(difficulty === 'high'){
+    energyDuration = 30;
+    pointsPerQuestion = 15;
+  } else if(difficulty === 'mid'){
+    energyDuration = 40;
+    pointsPerQuestion = 13;
+  } else {
+    // 하
+    energyDuration = 0; // 무제한
+    pointsPerQuestion = 10;
+  }
+
+  // 문제 무작위 섞기
+  questions = [...allQuestions];
+  shuffleArray(questions);
+  currentIndex = 0;
+  score = 0;
+  lives = 3;
+  totalTime = 0;
+
+  document.getElementById('score').textContent = score;
+  document.getElementById('lives').textContent = lives;
+
+  // 전체 시간 타이머 시작
+  gameTimerId = setInterval(()=>{
+    totalTime++;
+    document.getElementById('total-time').textContent = totalTime;
+  },1000);
+
+  showQuestion();
+}
+
+// ----------------------------------
+// 문제 표시
+// ----------------------------------
+function showQuestion(){
+  if(currentIndex >= questions.length){
+    // 모든 문제를 1바퀴 다 품 -> 다시 랜덤으로 무한 반복
+    shuffleArray(questions);
+    currentIndex = 0;
+  }
+
+  const q = questions[currentIndex];
+  document.getElementById('feedback').textContent = "";
+  document.getElementById('next-btn').classList.add('hidden');
+
+  // 에너지바 세팅
+  if(energyDuration > 0){
+    document.getElementById('energy-bar').classList.remove('hidden');
+    energyLeft = energyDuration;
+    updateEnergyBar();
+    if(energyTimerId) clearInterval(energyTimerId);
+    energyTimerId = setInterval(()=>{
+      energyLeft--;
+      updateEnergyBar();
+      if(energyLeft<=0){
+        // 시간 만료 -> 오답 처리와 동일: 기회1소모 후 다음문제
+        clearInterval(energyTimerId);
+        loseLife();
+      }
+    },1000);
+  } else {
+    // 무제한 모드
+    document.getElementById('energy-bar').classList.add('hidden');
+  }
+
+  // 문제 표시
+  document.getElementById('question-text').innerHTML = q.question;
+  MathJax.typeset(); // 수식 렌더링
+
+  // 보기나 주관식 입력 세팅
+  const choiceDiv = document.getElementById('choice-container');
+  const ansDiv = document.getElementById('answer-container');
+  choiceDiv.innerHTML = "";
+  ansDiv.classList.add('hidden');
+
+  if(q.type === "four" || q.type === "two" || q.type === "ox"){
+    // 보기 문제
+    // 보기(choices)를 섞어서 중복되지 않게
+    let arr = [...q.choices];
+    shuffleArray(arr);
+    arr.forEach(ch=>{
+      const btn = document.createElement('button');
+      btn.innerHTML = ch;
+      btn.onclick = ()=>checkAnswer(q, ch);
+      choiceDiv.appendChild(btn);
+    });
+  }
+  else if(q.type === "short"){
+    // 주관식
+    ansDiv.classList.remove('hidden');
+  }
+
+  MathJax.typeset(); // 다시 렌더링
+}
+
+// ----------------------------------
+// 에너지바 업데이트
+// ----------------------------------
+function updateEnergyBar(){
+  const fillEl = document.getElementById('energy-fill');
+  if(energyDuration>0){
+    const pct = (energyLeft / energyDuration)*100;
+    fillEl.style.width = pct + "%";
+  } else {
+    fillEl.style.width = "100%";
+  }
+}
+
+// ----------------------------------
+// 주관식 정답 제출
+// ----------------------------------
+function submitShortAnswer(){
+  const q = questions[currentIndex];
+  const userAns = document.getElementById('answer-input').value.trim();
+  checkAnswer(q, userAns);
+}
+
+// ----------------------------------
+// 정답 체크
+// ----------------------------------
+function checkAnswer(q, userAns){
+  if(energyTimerId) clearInterval(energyTimerId);
+
+  // 정답 판단
+  let isCorrect = false;
+  if(q.type==="four" || q.type==="two" || q.type==="ox"){
+    // 보기 문제
+    if(userAns===q.correct){
+      isCorrect = true;
+    }
+  } else if(q.type==="short"){
+    // 주관식: 공백 제거 후 단순 문자열 비교
+    if(userAns===q.correct){
+      isCorrect = true;
+    }
+  }
+
+  if(isCorrect){
+    // 정답
+    score += pointsPerQuestion;
+    document.getElementById('score').textContent = score;
+    document.getElementById('feedback').textContent = "정답입니다!";
+    document.getElementById('next-btn').classList.remove('hidden');
+  } else {
+    // 오답
+    document.getElementById('feedback').textContent = "오답입니다! 정답: "+q.correct;
+    loseLife();
+  }
+}
+
+// ----------------------------------
+// 기회 1회 소모(오답이든 시간만료든 동일 처리)
+// ----------------------------------
+function loseLife(){
+  lives--;
+  document.getElementById('lives').textContent = lives;
+  if(lives<=0){
+    // 게임 종료
+    endGame();
+  } else {
+    // 다음 문제로 넘어가기
+    document.getElementById('next-btn').classList.remove('hidden');
+  }
+}
+
+// ----------------------------------
+// 다음 문제
+// ----------------------------------
+function nextQuestion(){
+  document.getElementById('answer-input').value = "";
+  currentIndex++;
+  showQuestion();
+}
+
+// ----------------------------------
+// 게임 종료
+// ----------------------------------
+function endGame(){
+  if(gameTimerId) clearInterval(gameTimerId);
+  if(energyTimerId) clearInterval(energyTimerId);
+
+  alert("게임 종료! 점수: "+score+"  / 총 소요시간: "+totalTime+"초");
+  // 새로고침 or 초기화
+  location.reload();
+}
+
+// ----------------------------------
+// 모든 문항들 (지시문 + 식)
+// ----------------------------------
+const allQuestions = [
+
+  // 1) a의 조건 (5문항, 4지선다)
+  {
+    type: "four",
+    question:
+      "다음 방정식 \\(ax + 5 = -2x + 3\\)이 \\(x\\)에 대한 일차방정식이 되기 위한 \\(a\\)의 조건은?<br>",
+    choices: [
+      "\\(a = -2\\)",
+      "\\(a = 1\\)",
+      "\\(a \\neq -2\\)",
+      "\\(a \\neq 1\\)"
+    ],
+    correct: "\\(a \\neq -2\\)"
+  },
+  {
+    type: "four",
+    question:
+      "다음 방정식 \\((a+4)x + 5 = 0\\)이 \\(x\\)에 대한 일차방정식이 되기 위한 \\(a\\)의 조건은?<br>",
+    choices: [
+      "\\(a = -4\\)",
+      "\\(a \\neq -4\\)",
+      "\\(a = 4\\)",
+      "\\(a \\neq 4\\)"
+    ],
+    correct: "\\(a \\neq -4\\)"
+  },
+  {
+    type: "four",
+    question:
+      "다음 방정식 \\((2a - 3)x + 3 = 1\\)이 \\(x\\)에 대한 일차방정식이 되기 위한 \\(a\\)의 조건은?<br>",
+    choices: [
+      "\\(a = \\dfrac{3}{2}\\)",
+      "\\(a \\neq \\dfrac{3}{2}\\)",
+      "\\(a = 3\\)",
+      "\\(a \\neq 3\\)"
+    ],
+    correct: "\\(a \\neq \\dfrac{3}{2}\\)"
+  },
+  {
+    type: "four",
+    question:
+      "다음 방정식 \\(ax + 3 = x - 2\\)가 \\(x\\)에 대한 일차방정식이 되기 위한 \\(a\\)의 조건은?<br>",
+    choices: [
+      "\\(a = 1\\)",
+      "\\(a \\neq 1\\)",
+      "\\(a = -1\\)",
+      "\\(a \\neq -1\\)"
+    ],
+    correct: "\\(a \\neq 1\\)"
+  },
+  {
+    type: "four",
+    question:
+      "다음 방정식 \\(3ax + 5 = 6x - a\\)가 \\(x\\)에 대한 일차방정식이 되기 위한 \\(a\\)의 조건은?<br>",
+    choices: [
+      "\\(a = 2\\)",
+      "\\(a \\neq 2\\)",
+      "\\(a = -2\\)",
+      "\\(a \\neq -2\\)"
+    ],
+    correct: "\\(a \\neq 2\\)"
+  },
+
+  // 2) "일차방정식 여부 (O/X)" 29문항 => 2지선다
+  //  "다음 식이 x에 대한 일차방정식이면 O, 아니면 X를 하시오."
+  {
+    type: "ox",
+    question:
+      "다음 식이 \\(x\\)에 대한 일차방정식이면 O, 아니면 X를 하시오.<br>\\(x - 2 = 2 + x\\)",
+    choices: ["O","X"],
+    correct: "X"
+  },
+  {
+    type: "ox",
+    question:
+      "다음 식이 \\(x\\)에 대한 일차방정식이면 O, 아니면 X를 하시오.<br>\\(2x + 3 = 7\\)",
+    choices: ["O","X"],
+    correct: "O"
+  },
+  {
+    type: "ox",
+    question:
+      "다음 식이 \\(x\\)에 대한 일차방정식이면 O, 아니면 X를 하시오.<br>\\(3x + 5\\)",
+    choices: ["O","X"],
+    correct: "X"
+  },
+  {
+    type: "ox",
+    question:
+      "다음 식이 \\(x\\)에 대한 일차방정식이면 O, 아니면 X를 하시오.<br>\\(x + 5 > 0\\)",
+    choices: ["O","X"],
+    correct: "X"
+  },
+  {
+    type: "ox",
+    question:
+      "다음 식이 \\(x\\)에 대한 일차방정식이면 O, 아니면 X를 하시오.<br>\\(2 + 3 = 5\\)",
+    choices: ["O","X"],
+    correct: "X"
+  },
+  {
+    type: "ox",
+    question:
+      "다음 식이 \\(x\\)에 대한 일차방정식이면 O, 아니면 X를 하시오.<br>\\(3x - 6 = 3(x - 3)\\)",
+    choices: ["O","X"],
+    correct: "X"
+  },
+  {
+    type: "ox",
+    question:
+      "다음 식이 \\(x\\)에 대한 일차방정식이면 O, 아니면 X를 하시오.<br>\\(4x = 4x\\)",
+    choices: ["O","X"],
+    correct: "X"
+  },
+  {
+    type: "ox",
+    question:
+      "다음 식이 \\(x\\)에 대한 일차방정식이면 O, 아니면 X를 하시오.<br>\\(\\dfrac{1}{x} + 2 = -3\\)",
+    choices: ["O","X"],
+    correct: "X"
+  },
+  {
+    type: "ox",
+    question:
+      "다음 식이 \\(x\\)에 대한 일차방정식이면 O, 아니면 X를 하시오.<br>\\(3x - 4 = 2x + 3\\)",
+    choices: ["O","X"],
+    correct: "O"
+  },
+  {
+    type: "ox",
+    question:
+      "다음 식이 \\(x\\)에 대한 일차방정식이면 O, 아니면 X를 하시오.<br>\\(6x - 5 = 2x + 3\\)",
+    choices: ["O","X"],
+    correct: "O"
+  },
+  {
+    type: "ox",
+    question:
+      "다음 식이 \\(x\\)에 대한 일차방정식이면 O, 아니면 X를 하시오.<br>\\(2x + 5 = 3 + 2x\\)",
+    choices: ["O","X"],
+    correct: "X"
+  },
+  {
+    type: "ox",
+    question:
+      "다음 식이 \\(x\\)에 대한 일차방정식이면 O, 아니면 X를 하시오.<br>\\(3x - 4 = 5\\)",
+    choices: ["O","X"],
+    correct: "O"
+  },
+  {
+    type: "ox",
+    question:
+      "다음 식이 \\(x\\)에 대한 일차방정식이면 O, 아니면 X를 하시오.<br>\\(0.7x + 5 = -0.3x - 1\\)",
+    choices: ["O","X"],
+    correct: "O"
+  },
+  {
+    type: "ox",
+    question:
+      "다음 식이 \\(x\\)에 대한 일차방정식이면 O, 아니면 X를 하시오.<br>\\(-\\dfrac{2}{3}x + 1 = 0\\)",
+    choices: ["O","X"],
+    correct: "O"
+  },
+  {
+    type: "ox",
+    question:
+      "다음 식이 \\(x\\)에 대한 일차방정식이면 O, 아니면 X를 하시오.<br>\\(\\dfrac{x}{5} + 1 = \\dfrac{3}{5}x - 2\\)",
+    choices: ["O","X"],
+    correct: "O"
+  },
+  {
+    type: "ox",
+    question:
+      "다음 식이 \\(x\\)에 대한 일차방정식이면 O, 아니면 X를 하시오.<br>\\(x^2 + 2x + 1 = 0\\)",
+    choices: ["O","X"],
+    correct: "X"
+  },
+  {
+    type: "ox",
+    question:
+      "다음 식이 \\(x\\)에 대한 일차방정식이면 O, 아니면 X를 하시오.<br>\\(2x - 1 - x^2 = 0\\)",
+    choices: ["O","X"],
+    correct: "X"
+  },
+  {
+    type: "ox",
+    question:
+      "다음 식이 \\(x\\)에 대한 일차방정식이면 O, 아니면 X를 하시오.<br>\\(x^2 - 3 = 2x - x^2\\)",
+    choices: ["O","X"],
+    correct: "X"
+  },
+  {
+    type: "ox",
+    question:
+      "다음 식이 \\(x\\)에 대한 일차방정식이면 O, 아니면 X를 하시오.<br>\\(2x^2 + 3x = 1 + 2(x^2 - 1)\\)",
+    choices: ["O","X"],
+    correct: "O"
+  },
+  {
+    type: "ox",
+    question:
+      "다음 식이 \\(x\\)에 대한 일차방정식이면 O, 아니면 X를 하시오.<br>\\(x^2 = 3x + 4\\)",
+    choices: ["O","X"],
+    correct: "X"
+  },
+  {
+    type: "ox",
+    question:
+      "다음 식이 \\(x\\)에 대한 일차방정식이면 O, 아니면 X를 하시오.<br>\\(x^2 + 3x + 1 = 0\\)",
+    choices: ["O","X"],
+    correct: "X"
+  },
+  {
+    type: "ox",
+    question:
+      "다음 식이 \\(x\\)에 대한 일차방정식이면 O, 아니면 X를 하시오.<br>\\(x^2 + 2 = x(x + 2)\\)",
+    choices: ["O","X"],
+    correct: "O"
+  },
+  {
+    type: "ox",
+    question:
+      "다음 식이 \\(x\\)에 대한 일차방정식이면 O, 아니면 X를 하시오.<br>\\(3x + 4 = 2x + 5\\)",
+    choices: ["O","X"],
+    correct: "O"
+  },
+  {
+    type: "ox",
+    question:
+      "다음 식이 \\(x\\)에 대한 일차방정식이면 O, 아니면 X를 하시오.<br>\\(4x - 5 = 2x + 1\\)",
+    choices: ["O","X"],
+    correct: "O"
+  },
+  {
+    type: "ox",
+    question:
+      "다음 식이 \\(x\\)에 대한 일차방정식이면 O, 아니면 X를 하시오.<br>\\(x + 9 = 2\\)",
+    choices: ["O","X"],
+    correct: "O"
+  },
+  {
+    type: "ox",
+    question:
+      "다음 식이 \\(x\\)에 대한 일차방정식이면 O, 아니면 X를 하시오.<br>\\(-\\dfrac{3}{4}x - 5 = 0\\)",
+    choices: ["O","X"],
+    correct: "O"
+  },
+  {
+    type: "ox",
+    question:
+      "다음 식이 \\(x\\)에 대한 일차방정식이면 O, 아니면 X를 하시오.<br>\\(2(x + 4) = 5 + 2x\\)",
+    choices: ["O","X"],
+    correct: "X"
+  },
+  {
+    type: "ox",
+    question:
+      "다음 식이 \\(x\\)에 대한 일차방정식이면 O, 아니면 X를 하시오.<br>\\(x^2 - 2x + 5 = x^2 + 3x\\)",
+    choices: ["O","X"],
+    correct: "O"
+  },
+  {
+    type: "ox",
+    question:
+      "다음 식이 \\(x\\)에 대한 일차방정식이면 O, 아니면 X를 하시오.<br>\\(-x + 2x^2 = 2x^2 - 3\\)",
+    choices: ["O","X"],
+    correct: "O"
+  },
+
+  // 3) "x의 해를 구하라" 28문항
+  //    일부 4지선다, 일부 주관식
+  //    "다음 일차방정식의 해를 구하여라." + (식)
+  {
+    type: "four",
+    question:
+      "다음 일차방정식의 해를 구하여라.<br>\\(x + 2 = 8\\)",
+    choices: ["4","6","-6","2"],
+    correct: "6"
+  },
+  {
+    type: "four",
+    question:
+      "다음 일차방정식의 해를 구하여라.<br>\\(7x = 49\\)",
+    choices: ["5","49","7","-7"],
+    correct: "7"
+  },
+  {
+    type: "four",
+    question:
+      "다음 일차방정식의 해를 구하여라.<br>\\(x - 3 = 0\\)",
+    choices: ["-3","0","1","3"],
+    correct: "3"
+  },
+  {
+    type: "four",
+    question:
+      "다음 일차방정식의 해를 구하여라.<br>\\(x + 3 = -1\\)",
+    choices: ["4","-4","-1","3"],
+    correct: "-4"
+  },
+  {
+    type: "four",
+    question:
+      "다음 일차방정식의 해를 구하여라.<br>\\(\\dfrac{1}{3}x = 2\\)",
+    choices: ["6","2","-6","3"],
+    correct: "6"
+  },
+  {
+    type: "four",
+    question:
+      "다음 일차방정식의 해를 구하여라.<br>\\(-\\dfrac{x}{2} = 3\\)",
+    choices: ["-6","6","-3","0"],
+    correct: "-6"
+  },
+  {
+    type: "four",
+    question:
+      "다음 일차방정식의 해를 구하여라.<br>\\(3x = 6\\)",
+    choices: ["2","-2","3","6"],
+    correct: "2"
+  },
+  {
+    type: "four",
+    question:
+      "다음 일차방정식의 해를 구하여라.<br>\\(-5x = 10\\)",
+    choices: ["-2","2","5","-5"],
+    correct: "-2"
+  },
+  {
+    type: "four",
+    question:
+      "다음 일차방정식의 해를 구하여라.<br>\\(4x - 3 = 5\\)",
+    choices: ["3","1","2","-2"],
+    correct: "2"
+  },
+  {
+    type: "four",
+    question:
+      "다음 일차방정식의 해를 구하여라.<br>\\(3x + 5 = 4x\\)",
+    choices: ["5","-5","0","1"],
+    correct: "5"
+  },
+  {
+    type: "four",
+    question:
+      "다음 일차방정식의 해를 구하여라.<br>\\(\\dfrac{1}{3}x - 4 = 2\\)",
+    choices: ["6","10","18","-18"],
+    correct: "18"
+  },
+  {
+    type: "four",
+    question:
+      "다음 일차방정식의 해를 구하여라.<br>\\(-\\dfrac{2}{3}x = 4\\)",
+    choices: ["6","-6","-2","2"],
+    correct: "-6"
+  },
+  {
+    type: "four",
+    question:
+      "다음 일차방정식의 해를 구하여라.<br>\\(-x + 3 = 5\\)",
+    choices: ["2","-2","3","-3"],
+    correct: "-2"
+  },
+  {
+    type: "four",
+    question:
+      "다음 일차방정식의 해를 구하여라.<br>\\(\\dfrac{2}{5}x - 4 = -2\\)",
+    choices: ["5","-5","2","10"],
+    correct: "5"
+  },
+  {
+    type: "four",
+    question:
+      "다음 일차방정식의 해를 구하여라.<br>\\(3 + 2x = 7\\)",
+    choices: ["1","2","7","-2"],
+    correct: "2"
+  },
+  {
+    type: "four",
+    question:
+      "다음 일차방정식의 해를 구하여라.<br>\\(-4x + 1 = -3 + 2x\\)",
+    choices: ["\\(\\dfrac{1}{2}\\)","\\(\\dfrac{2}{3}\\)","1","\\(-\\dfrac{2}{3}\\)"],
+    correct: "\\(\\dfrac{2}{3}\\)"
+  },
+  {
+    type: "four",
+    question:
+      "다음 일차방정식의 해를 구하여라.<br>\\(x + 24 = 12\\)",
+    choices: ["12","-12","-24","0"],
+    correct: "-12"
+  },
+  {
+    type: "four",
+    question:
+      "다음 일차방정식의 해를 구하여라.<br>\\(3x - 6 = -4x + 15\\)",
+    choices: ["-3","3","7","0"],
+    correct: "3"
+  },
+  {
+    type: "four",
+    question:
+      "다음 일차방정식의 해를 구하여라.<br>\\(3x - 4 = 5\\)",
+    choices: ["1","3","5","-3"],
+    correct: "3"
+  },
+  {
+    type: "four",
+    question:
+      "다음 일차방정식의 해를 구하여라.<br>\\(5x = 12 + x\\)",
+    choices: ["3","-3","12","2"],
+    correct: "3"
+  },
+  {
+    type: "four",
+    question:
+      "다음 일차방정식의 해를 구하여라.<br>\\(-2x - 1 = 3\\)",
+    choices: ["2","-2","4","-4"],
+    correct: "-2"
+  },
+  {
+    type: "four",
+    question:
+      "다음 일차방정식의 해를 구하여라.<br>\\(3x - 5 = 7\\)",
+    choices: ["4","-4","12","2"],
+    correct: "4"
+  },
+  {
+    type: "four",
+    question:
+      "다음 일차방정식의 해를 구하여라.<br>\\(2x - 1 = 3\\)",
+    choices: ["1","2","3","4"],
+    correct: "2"
+  },
+  {
+    type: "short",
+    question:
+      "다음 일차방정식의 해를 구하여라.<br>\\(-2(3 - 2x) = 7(2 - x) + 2\\)",
+    correct: "2"
+  },
+  {
+    type: "short",
+    question:
+      "다음 일차방정식의 해를 구하여라.<br>\\(2(3 - 2x) = 3(x - 2)\\)",
+    correct: "\\(\\dfrac{12}{7}\\)"
+  },
+  {
+    type: "short",
+    question:
+      "다음 일차방정식의 해를 구하여라.<br>\\(5 - 2(3x + 1) = 3(5 - x)\\)",
+    correct: "-4"
+  },
+  {
+    type: "short",
+    question:
+      "다음 일차방정식의 해를 구하여라.<br>\\(27 = 5(2x + 4) - 3(x + 7)\\)",
+    correct: "4"
+  },
+  {
+    type: "short",
+    question:
+      "다음 일차방정식의 해를 구하여라.<br>\\(28 = 5(2x + 3) - 3(x - 2)\\)",
+    correct: "1"
+  },
+  {
+    type: "short",
+    question:
+      "다음 일차방정식의 해를 구하여라.<br>\\(2(3x - 5) - (4x + 1) = 7\\)",
+    correct: "9"
+  }
+];
+</script>
+</body>
+</html>
